@@ -3,15 +3,18 @@
 
 var tmx = parseInt(process.env.TIMEOUT_MULTIPLIER || 1, 10)
 
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 var Code = require('code')
 var Hoek = require('hoek')
-var Seneca = require('..')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
 
 var Transports = require('./stubs/transports.js')
 
@@ -111,6 +114,12 @@ describe('message', function() {
       .act('a:1', function(err, out) {
         expect(i).equal(4)
         expect(err.code).equal('maxparents')
+        expect(err.details.parents).equal([
+          'a:1 a1_8',
+          'a:1 a1_8',
+          'a:1 a1_8',
+          'a:1 a1_8'
+        ])
         fin()
       })
   })
@@ -194,39 +203,6 @@ describe('message', function() {
           ])
         ).true()
 
-        fin()
-      })
-  })
-
-  it('custom', test_opts, function(fin) {
-    var si = Seneca()
-      .test(fin)
-      .add('a:1', function a1(msg, reply, meta) {
-        meta.custom.a1 = 1
-        reply({ x: 1 })
-      })
-      .add('a:2', function a2(msg, reply, meta) {
-        meta.custom.a2 = 1
-        msg.x = 2
-        reply(msg)
-      })
-
-    var foo = { y: 1 }
-    var bar = { z: 1 }
-
-    si
-      .gate()
-      .act({ a: 1, custom$: foo }, function(err, out, meta) {
-        expect(err).equal(null)
-        expect(out).includes({ x: 1 })
-        expect(foo).equal({ y: 1, a1: 1 })
-        expect(meta.custom).equal({ y: 1, a1: 1 })
-      })
-      .act({ a: 2, custom$: bar }, function(err, out, meta) {
-        expect(err).equal(null)
-        expect(out).includes({ a: 2, x: 2 })
-        expect(bar).equal({ z: 1, a2: 1 })
-        expect(meta.custom).equal({ z: 1, a2: 1 })
         fin()
       })
   })
@@ -323,7 +299,9 @@ describe('message', function() {
   })
 
   it('entity', test_opts, function(fin) {
-    var si = Seneca().test(fin).use('entity')
+    var si = Seneca()
+      .test(fin)
+      .use('entity')
 
     si = si.gate()
 
@@ -442,10 +420,9 @@ describe('message', function() {
 
     s0.ready(function() {
       c0.ready(function() {
-        c0
-          .add('b:1', function b1(msg, reply, meta) {
-            this.act({ id$: 'b1/' + meta.tx, x: msg.x }, reply)
-          })
+        c0.add('b:1', function b1(msg, reply, meta) {
+          this.act({ id$: 'b1/' + meta.tx, x: msg.x }, reply)
+        })
           .act('a:1,id$:m0/t0', function(err, out, meta) {
             expect(err).not.exist()
             expect(out).not.exist()

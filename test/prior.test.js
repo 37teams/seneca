@@ -3,13 +3,16 @@
 
 var _ = require('lodash')
 var Code = require('code')
-var Lab = require('lab')
-var Seneca = require('..')
+var Lab = require('@hapi/lab')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
 
 var testopts = { log: 'test' }
 
@@ -28,6 +31,18 @@ describe('prior', function() {
         expect(out.x).equal(3)
         fin()
       })
+  })
+
+  it('top-level', function(fin) {
+    try {
+      Seneca()
+        .test()
+        .prior({ a: 1 })
+      expect(false).true()
+    } catch (e) {
+      expect(e.code).equal('no_prior_action')
+      fin()
+    }
   })
 
   it('add-general-to-specific', function(done) {

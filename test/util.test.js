@@ -3,24 +3,20 @@
 'use strict'
 
 var Code = require('code')
-var Lab = require('lab')
-var Seneca = require('..')
+var Lab = require('@hapi/lab')
 var Util = require('util')
 
 var testopts = { log: 'silent' }
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
 
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
+
 describe('util', function() {
-  lab.beforeEach(function(done) {
-    process.removeAllListeners('SIGHUP')
-    process.removeAllListeners('SIGTERM')
-    process.removeAllListeners('SIGINT')
-    process.removeAllListeners('SIGBREAK')
-    done()
-  })
   var si = Seneca(testopts)
 
   it('seneca.util.deepextend.happy', function(done) {
@@ -94,23 +90,6 @@ describe('util', function() {
     expect(to.do).to.equal(t1.do)
     expect(to.f).to.equal(t1.f)
     expect(to.re).to.equal(t1.re)
-    done()
-  })
-
-  it('seneca.util.argprops', function(done) {
-    var out = si.util.argprops(
-      { a: 1, b: 2, c: 3 },
-      { b: 22, c: 33, d: 4 },
-      { c: 333 },
-      ['d']
-    )
-    expect(out).to.include({ a: 1, b: 22, c: 333 })
-
-    out = si.util.argprops({}, { d: 1 }, {}, 'd')
-    expect('{}').to.equal(Util.inspect(out))
-
-    out = si.util.argprops({}, { d: 1, e: 2 }, {}, 'd, e')
-    expect('{}').to.equal(Util.inspect(out))
     done()
   })
 

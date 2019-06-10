@@ -1,14 +1,17 @@
 /* Copyright (c) 2016 Richard Rodger, MIT License */
 'use strict'
 
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 var Code = require('code')
-var Seneca = require('..')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
 
 describe('logging', function() {
   it('happy', function(fin) {
@@ -30,6 +33,36 @@ describe('logging', function() {
         expect(log[0].seen).to.equal('a:1')
         fin()
       })
+  })
+
+  it('event', function(fin) {
+    var loga = []
+    var logb = []
+    Seneca({
+      events: {
+        log: function(data) {
+          loga.push(data)
+        }
+      }
+    })
+      .test()
+      .on('log', function(data) {
+        logb.push(data)
+      })
+      .ready(function() {
+        expect(loga.length).above(logb.length)
+        var last_entry = logb[logb.length - 1]
+        expect(last_entry).contains({ kind: 'notice', level: 'info' })
+        expect(last_entry.notice).startsWith('hello')
+        fin()
+      })
+  })
+
+  it('quiet', function(fin) {
+    Seneca()
+      .quiet()
+      .error(fin)
+      .ready(fin)
   })
 
   it('basic', function(fin) {
@@ -69,10 +102,17 @@ describe('logging', function() {
 
     function nothing() {
       log = []
-      Seneca().error(restore).add('a:1', a1).act('a:1').ready(function() {
-        expect(log.length).to.equal(1)
-        quiet()
-      })
+      Seneca()
+        .error(restore)
+        .add('a:1', a1)
+        .act('a:1')
+        .ready(function() {
+          // hello entry, legacy-transport ready entry
+          // remove legacy-transport entry in 4.x
+          expect(log.length).to.equal(2)
+
+          quiet()
+        })
     }
 
     function quiet() {
@@ -142,7 +182,10 @@ describe('logging', function() {
         .add('a:1', a1)
         .act('a:1')
         .ready(function() {
-          expect(log.length).to.equal(1)
+          // hello entry, legacy-transport ready entry
+          // remove legacy-transport entry in 4.x
+          expect(log.length).to.equal(2)
+
           do_test()
         })
     }
@@ -161,7 +204,10 @@ describe('logging', function() {
   })
 
   it('test-mode', function(fin) {
-    Seneca.test(fin).add('a:1', a1).act('a:1').ready(fin)
+    Seneca.test(fin)
+      .add('a:1', a1)
+      .act('a:1')
+      .ready(fin)
   })
 })
 

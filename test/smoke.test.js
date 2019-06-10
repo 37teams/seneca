@@ -1,14 +1,17 @@
 /* Copyright (c) 2016 Richard Rodger, MIT License */
 'use strict'
 
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 var Code = require('code')
-var Seneca = require('..')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
 
 var test_opts = { xlog: 'test' }
 

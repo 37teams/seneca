@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2016 Richard Rodger, MIT License */
+/* Copyright (c) 2010-2019 Richard Rodger and other contributors, MIT License */
 'use strict'
 
 var Assert = require('assert')
@@ -6,16 +6,22 @@ var Util = require('util')
 var Code = require('code')
 var Gex = require('gex')
 var _ = require('lodash')
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 var Package = require('../package.json')
-var Seneca = require('..')
 var Common = require('../lib/common.js')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
 var assert = Assert
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
+
+var tmx = parseInt(process.env.TIMEOUT_MULTIPLIER || 1, 10)
+console.log('TEST transport tmx=' + tmx)
 
 // timerstub broken on node 0.11
 // var timerstub = require('timerstub')
@@ -31,30 +37,18 @@ var timerstub = {
 var testopts = { log: 'test' }
 
 describe('seneca', function() {
-  lab.beforeEach(function(done) {
-    process.removeAllListeners('SIGHUP')
-    process.removeAllListeners('SIGTERM')
-    process.removeAllListeners('SIGINT')
-    process.removeAllListeners('SIGBREAK')
-    done()
-  })
-
   it('happy', function(fin) {
     Seneca()
       .test(fin)
       .add('a:1', function(msg, reply, meta) {
-        // console.log('ACTION', msg, JSON.stringify(msg), meta, reply)
         expect(msg).includes({ a: 1 })
-        //expect(JSON.stringify(msg)).equals('{"a":1}')
         expect(JSON.stringify(this.util.clean(msg))).equals('{"a":1}')
         expect(meta).includes({ pattern: 'a:1' })
         reply({ x: 1 })
       })
       .act('a:1', function(err, out, meta) {
-        // console.log('REPLY', err, out, out.meta$, meta)
         expect(err).not.exist()
         expect(out).includes({ x: 1 })
-        //expect(JSON.stringify(out)).equals('{"x":1}')
         expect(JSON.stringify(this.util.clean(out))).equals('{"x":1}')
         expect(meta).includes({ pattern: 'a:1' })
         expect(meta).includes(meta)
@@ -71,7 +65,7 @@ describe('seneca', function() {
     // ensure startup time does not degenerate
     expect(end - start).to.be.below(333)
 
-    expect(si).to.equal(si.seneca())
+    expect(si === si.seneca()).true()
     done()
   })
 
@@ -79,6 +73,22 @@ describe('seneca', function() {
     var si = Seneca({ tag: 'foo' }, testopts)
     expect(si.tag).to.equal('foo')
     expect(si.id).to.endWith('/foo')
+    done()
+  })
+
+  it('json-inspect', function(done) {
+    var si = Seneca({ id$: 'a' }, testopts)
+    si.start_time = 123
+    expect(JSON.stringify(si)).equal(
+      '{"isSeneca":true,"id":"a","fixedargs":{},"start_time":123,"version":"' +
+        Package.version +
+        '"}'
+    )
+    expect(Util.inspect(si)).equal(
+      "{ isSeneca: true,\n  id: 'a',\n  did: undefined,\n  fixedargs: {},\n  fixedmeta: undefined,\n  start_time: 123,\n  version: '" +
+        Package.version +
+        "' }"
+    )
     done()
   })
 
@@ -153,6 +163,20 @@ describe('seneca', function() {
 
     si.ready(function() {
       done()
+    })
+  })
+
+  it('ready-error-test', function(fin) {
+    var si = Seneca()
+      .test()
+      .error(function(err) {
+        expect(err.code).equal('ready_failed')
+        expect(err.message).equal('seneca: Ready function failed: foo')
+        fin()
+      })
+
+    si.ready(function() {
+      throw new Error('foo')
     })
   })
 
@@ -440,6 +464,7 @@ describe('seneca', function() {
     function bar(msg, next, meta) {
       var bar_meta = meta
       var pmsg = { a: msg.a, s: msg.s }
+
       this.prior(pmsg, function(e, o) {
         o.b = 2
         o.bar = bar_meta
@@ -500,8 +525,7 @@ describe('seneca', function() {
         this.prior(msg, reply)
       })
 
-      si
-        .gate()
+      si.gate()
         .act('foo:a,x:10,y:0.1', function(err) {
           assert.equal(err, null)
           assert.equal(11.1, count)
@@ -555,8 +579,7 @@ describe('seneca', function() {
       done(null, { count: count })
     })
 
-    si
-      .gate()
+    si.gate()
       .act('foo:a,x:10', function(err) {
         assert.equal(err, null)
         assert.equal(11, count)
@@ -609,11 +632,11 @@ describe('seneca', function() {
     }
 
     si = Seneca(testopts)
-      .add('a:1', function(args) {
-        this.good({ b: args.a + 1 })
+      .add('a:1', function(msg, reply) {
+        reply({ b: msg.a + 1 })
       })
-      .add('a:2', function(args) {
-        this.good({ b: args.a + 2 })
+      .add('a:2', function(msg, reply) {
+        reply({ b: msg.a + 2 })
       })
 
     si.act_if(true, 'a:1', function(err, out) {
@@ -640,8 +663,8 @@ describe('seneca', function() {
         return self
       }
       self.init = function() {
-        this.add({ role: self.name, cmd: 'foo' }, function(args, cb) {
-          cb(null, 'foo:' + args.foo)
+        this.add({ role: self.name, cmd: 'foo' }, function(msg, cb) {
+          cb(null, 'foo:' + msg.foo)
         })
       }
     }
@@ -675,8 +698,8 @@ describe('seneca', function() {
         return self
       }
       self.init = function() {
-        this.add({ role: 'mock1', cmd: 'foo' }, function(args, cb) {
-          this.prior(args, function(err, out) {
+        this.add({ role: 'mock1', cmd: 'foo' }, function(msg, cb) {
+          this.prior(msg, function(err, out) {
             assert.equal(err, null)
             cb(null, 'bar:' + out)
           })
@@ -703,11 +726,11 @@ describe('seneca', function() {
 
   it('fire-and-forget', function(done) {
     var si = Seneca({ log: 'silent' })
-    si.add({ a: 1 }, function(args, cb) {
-      cb(null, args.a + 1)
+    si.add({ a: 1 }, function(msg, cb) {
+      cb(null, msg.a + 1)
     })
-    si.add({ a: 1, b: 2 }, function(args, cb) {
-      cb(null, args.a + args.b)
+    si.add({ a: 1, b: 2 }, function(msg, cb) {
+      cb(null, msg.a + msg.b)
     })
 
     si.act({ a: 1 })
@@ -790,25 +813,28 @@ describe('seneca', function() {
       done()
     }
 
-    var si = Seneca(testopts).error(done)
+    var si = Seneca().test(done) //(testopts).error(done)
 
-    si
-      .add('i:0,a:1,b:2', addFunction)
-      .act('i:0,a:1,b:2,c:3', function(err, out) {
-        checkFunction(err, out, function() {
-          si
-            .add('i:1,a:1', { b: 2 }, addFunction)
-            .act('i:1,a:1,b:2,c:3', function(err, out) {
-              checkFunction(err, out, function() {
-                si
-                  .add('i:2,a:1', { b: 2, c: { required$: true } }, addFunction)
-                  .act('i:2,a:1,b:2,c:3', function(err, out) {
-                    checkFunction(err, out, done)
-                  })
+    si.add('i:0,a:1,b:2', addFunction)
+
+    si.act('i:0,a:1,b:2,c:3', function(err, out) {
+      checkFunction(err, out, function() {
+        si.add('i:1,a:1', { b: 2 }, addFunction).act(
+          'i:1,a:1,b:2,c:3',
+          function(err, out) {
+            checkFunction(err, out, function() {
+              si.add(
+                'i:2,a:1',
+                { b: 2, c: { required$: true } },
+                addFunction
+              ).act('i:2,a:1,b:2,c:3', function(err, out) {
+                checkFunction(err, out, done)
               })
             })
-        })
+          }
+        )
       })
+    })
   })
 
   it('fix-basic', function(done) {
@@ -818,8 +844,7 @@ describe('seneca', function() {
       cb(null, { r: '' + args.a + (args.b || '-') + (args.c || '-') + args.z })
     }
 
-    si
-      .fix('a:1')
+    si.fix('a:1')
       .add('b:2', ab)
       .add('c:3', ab)
       .act('b:2,z:8', function(err, out) {
@@ -831,15 +856,13 @@ describe('seneca', function() {
         assert.equal('1-39', out.r)
       })
 
-    si
-      .act('a:1,b:2,z:8', function(err, out) {
-        assert.equal(err, null)
-        assert.equal('12-8', out.r)
-      })
-      .act('a:1,c:3,z:9', function(err, out) {
-        assert.equal(err, null)
-        assert.equal('1-39', out.r)
-      })
+    si.act('a:1,b:2,z:8', function(err, out) {
+      assert.equal(err, null)
+      assert.equal('12-8', out.r)
+    }).act('a:1,c:3,z:9', function(err, out) {
+      assert.equal(err, null)
+      assert.equal('1-39', out.r)
+    })
 
     done()
   })
@@ -974,13 +997,15 @@ describe('seneca', function() {
   })
 
   it('act-history', function(fin) {
-    var si = Seneca().test(fin).use('entity')
+    var si = Seneca()
+      .test(fin)
+      .use('entity')
 
     var x = 0
 
-    si.add({ a: 1 }, function() {
+    si.add({ a: 1 }, function(msg, reply) {
       x++
-      this.good({ x: x })
+      reply({ x: x })
     })
 
     si.act({ a: 1 }, function(err, out) {
@@ -1128,13 +1153,12 @@ describe('seneca', function() {
     })
   })
 
-  it('strict', function(fin) {
-    var si = Seneca({ log: 'silent' })
+  it('strict-result', function(fin) {
+    var si = Seneca({ log: 'silent', legacy: { transport: false } })
 
-    si.add('a:1', function(a, cb) {
-      cb(null, 'a')
-    })
-    si.act('a:1', function(err) {
+    si.add('a:1', function(msg, reply) {
+      reply('a')
+    }).act('a:1', function(err) {
       assert.ok(err)
       assert.equal('result_not_objarr', err.code)
 
@@ -1160,52 +1184,6 @@ describe('seneca', function() {
           done()
         })
       })
-  })
-
-  describe('#error', function() {
-    it("isn't called twice on fatal errors when fatal$: true", function(done) {
-      var si = Seneca({ log: 'silent', debug: { undead: true } })
-
-      var count = 0
-      si.error(function() {
-        assert(++count === 1)
-      })
-
-      si.add({ role: 'foo', cmd: 'bar' }, function(args, cb) {
-        cb(new Error('test error'))
-      })
-
-      si.act({ role: 'foo', cmd: 'bar', fatal$: true }, function(err) {
-        assert(!err)
-      })
-
-      setTimeout(function() {
-        assert(count === 1)
-        done()
-      }, 200)
-    })
-
-    it("isn't called twice when fatal$: false", function(done) {
-      var si = Seneca({ log: 'silent', debug: { undead: true } })
-
-      var count = 0
-      si.error(function() {
-        ++count
-      })
-
-      si.add({ role: 'foo', cmd: 'bar' }, function(args, cb) {
-        cb(new Error('test error'))
-      })
-
-      si.act({ role: 'foo', cmd: 'bar', fatal$: false }, function(err) {
-        assert(err)
-      })
-
-      setTimeout(function() {
-        assert(count === 1)
-        done()
-      }, 200)
-    })
   })
 
   describe('#decorate', function() {
@@ -1254,13 +1232,6 @@ describe('seneca', function() {
 
       assert.throws(fn)
       done()
-    })
-  })
-
-  it('basic-close', function(fin) {
-    Seneca({ legacy: { transport: false } }).test(fin).close(function(err) {
-      assert(!err)
-      fin()
     })
   })
 
@@ -1425,7 +1396,7 @@ describe('seneca', function() {
       .ready(done)
   })
 
-  it('memory', function(done) {
+  it('memory', { timeout: 2222 * tmx }, function(done) {
     var SIZE = 1000
 
     Seneca({ log: 'silent' })
@@ -1448,7 +1419,7 @@ describe('seneca', function() {
 
     function validate(start) {
       var end = Date.now()
-      expect(end - start).below(1500)
+      expect(end - start).below(1500 * tmx)
 
       var mem = process.memoryUsage()
       expect(mem.rss).below(200000000)
@@ -1495,18 +1466,6 @@ describe('seneca', function() {
     })
   })
 
-  it('handle-close', function(fin) {
-    var si = Seneca({
-      system: {
-        exit: function(exit_val) {
-          expect(exit_val).equal(0)
-          fin()
-        }
-      }
-    })
-    si.private$.handle_close()
-  })
-
   it('reply-seneca', function(fin) {
     Seneca()
       .test(fin)
@@ -1528,6 +1487,51 @@ describe('seneca', function() {
       .act('b:1', function(ignore, out) {
         expect(this.id).equal(out.id0)
         expect(this.id).equal(out.id1)
+      })
+      .ready(fin)
+  })
+
+  it('pattern-types', function(fin) {
+    Seneca()
+      .test(fin)
+      // Just the value types from json.org, excluding object and array
+
+      .add({ s: 's' }, function(msg, reply) {
+        reply({ s: msg.s })
+      })
+      .add({ i: 1 }, function(msg, reply) {
+        reply({ i: msg.i })
+      })
+      .add({ f: 1.1 }, function(msg, reply) {
+        reply({ f: msg.f })
+      })
+      .add({ bt: true }, function(msg, reply) {
+        reply({ bt: msg.bt })
+      })
+      .add({ bf: false }, function(msg, reply) {
+        reply({ bf: msg.bf })
+      })
+      .add({ n: null }, function(msg, reply) {
+        reply({ n: msg.n })
+      })
+      .gate()
+      .act({ s: 's' }, function(ignore, out) {
+        expect(Util.inspect(out)).equal("{ s: 's' }")
+      })
+      .act({ i: 1 }, function(ignore, out) {
+        expect(Util.inspect(out)).equal('{ i: 1 }')
+      })
+      .act({ f: 1.1 }, function(ignore, out) {
+        expect(Util.inspect(out)).equal('{ f: 1.1 }')
+      })
+      .act({ bt: true }, function(ignore, out) {
+        expect(Util.inspect(out)).equal('{ bt: true }')
+      })
+      .act({ bf: false }, function(ignore, out) {
+        expect(Util.inspect(out)).equal('{ bf: false }')
+      })
+      .act({ n: null }, function(ignore, out) {
+        expect(Util.inspect(out)).equal('{ n: null }')
       })
       .ready(fin)
   })

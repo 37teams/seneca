@@ -3,14 +3,17 @@
 
 var Assert = require('assert')
 
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 var Code = require('code')
-var Seneca = require('..')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
 
 var parents = msg => msg.meta$.parents.map(x => x[0])
 
@@ -27,16 +30,17 @@ describe('entity', function() {
   })
 
   it('entity-msg', function(fin) {
-    var si = Seneca().test(fin).use('entity')
+    var si = Seneca()
+      .test(fin)
+      .use('entity')
 
     var foo = si.make$('foo', { a: 1 })
     var bar = si.make$('bar', { c: 3 })
 
-    si
-      .add('a:1', function(msg, reply) {
-        msg.x = 2
-        reply(msg)
-      })
+    si.add('a:1', function(msg, reply) {
+      msg.x = 2
+      reply(msg)
+    })
       .add('c:3', function(msg, reply) {
         msg.b.y = 3
         reply({ z: msg.b })
@@ -58,7 +62,9 @@ describe('entity', function() {
   })
 
   it('mem-ops', function(fin) {
-    var si = Seneca({ tag: 'e0' }).test(fin).use('entity')
+    var si = Seneca({ tag: 'e0' })
+      .test(fin)
+      .use('entity')
 
     si = si.gate()
 

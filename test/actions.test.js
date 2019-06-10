@@ -1,13 +1,17 @@
-/* Copyright (c) 2017 Richard Rodger, MIT License */
+/* Copyright (c) 2017-2019 Richard Rodger and other contributors, MIT License */
 'use strict'
 
+var Util = require('util')
+
 var Code = require('code')
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
 
 var Seneca = require('..')
 
@@ -18,8 +22,22 @@ describe('actions', function() {
     reply({ z: msg.z })
   }
 
+  it('cmd_ping', function(fin) {
+    var si = Seneca({ legacy: { transport: false } }).test(fin)
+    expect(si.ping().id).equals(si.id)
+
+    si.listen().ready(function() {
+      this.act('role:seneca,cmd:ping', function(err, out) {
+        expect(out.id).equals(this.id)
+        si.close(fin)
+      })
+    })
+  })
+
   it('cmd_stats', function(fin) {
-    var si = Seneca().add('a:1').act('a:1')
+    var si = Seneca()
+      .add('a:1')
+      .act('a:1')
 
     si.test(fin).act('role:seneca,cmd:stats', function(err, out) {
       expect(out.act).exists()
@@ -64,10 +82,9 @@ describe('actions', function() {
       si.close = function() {}
       si.root.close = function() {}
 
-      si
-        .add('role:seneca,cmd:close', function(msg, reply) {
-          reply()
-        })
+      si.add('role:seneca,cmd:close', function(msg, reply) {
+        reply()
+      })
         .sub('role:seneca,info:fatal', function(msg) {
           expect(msg.err).exist()
           fin()
@@ -103,19 +120,5 @@ describe('actions', function() {
         })
       })
     })
-  })
-
-  it('make_error', function(fin) {
-    var si = Seneca({ log: 'silent' })
-    si.act(
-      'role:seneca,make:error',
-      { code: 'foo', err: new Error('bar') },
-      function(err, out) {
-        expect(out).equal(null)
-        expect(err.message.match(/bar/)).exists()
-        expect(err.code).equal('act_execute')
-        fin()
-      }
-    )
   })
 })

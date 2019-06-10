@@ -3,15 +3,18 @@
 
 var Util = require('util')
 
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 var Code = require('code')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
 
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
 var Outward = require('../lib/outward')
+var API = require('../lib/api')
 
 describe('outward', function() {
   it('make_error', function(fin) {
@@ -40,6 +43,17 @@ describe('outward', function() {
       { meta: {} }
     )
     expect(private$.stats.act.done).equal(1)
+    fin()
+  })
+
+  it('arg-check', function(fin) {
+    try {
+      API.outward()
+      expect(false).true()
+    } catch (e) {
+      expect(e.code).equal('invalid_arguments')
+    }
+
     fin()
   })
 })

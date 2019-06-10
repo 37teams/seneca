@@ -1,15 +1,21 @@
-/* Copyright (c) 2014-2017 Richard Rodger, MIT License */
+/* Copyright (c) 2014-2018 Richard Rodger, MIT License */
 'use strict'
 
 var Assert = require('assert')
-var Lab = require('lab')
-var Seneca = require('..')
+var Lab = require('@hapi/lab')
+var Code = require('code')
 var TransportStubs = require('./stubs/transports')
 
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
+var expect = Code.expect
 var assert = Assert
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
+
 var testopts = { log: 'silent' }
 
 // Shortcuts
@@ -18,13 +24,22 @@ var arrayify = Function.prototype.apply.bind(Array.prototype.slice)
 var make_test_transport = TransportStubs.make_test_transport
 
 describe('error', function() {
-  lab.beforeEach(function(done) {
-    process.removeAllListeners('SIGHUP')
-    process.removeAllListeners('SIGTERM')
-    process.removeAllListeners('SIGINT')
-    process.removeAllListeners('SIGBREAK')
-    done()
+  it('fail', function(fin) {
+    var si = Seneca({ tag: 'aaa' }).test()
+
+    try {
+      si.fail('foo', 'Foo')
+      expect(false).true()
+    } catch (e) {
+      expect(e.code).equal('foo')
+      expect(e.message).contains('Foo')
+      fin()
+    }
   })
+
+  it('response_is_error', response_is_error)
+  it('action_callback', action_callback)
+  it('plugin_load', plugin_load)
 
   it('act_not_found', act_not_found)
 
@@ -41,11 +56,104 @@ describe('error', function() {
   it('exec_action_result_nolog', exec_action_result_nolog)
   it('exec_action_errhandler_result', exec_action_errhandler_result)
 
-  it('action_callback', action_callback)
+  it('action_callback', action_callback_legacy)
 
   it('ready_die', ready_die)
 
   it('legacy_fail', legacy_fail)
+
+  it('types', types)
+
+  function response_is_error(fin) {
+    var si = Seneca({ log: 'silent' })
+
+    si.add('a:1', function(msg, reply) {
+      var foo = new Error('foo')
+      foo.a = 1
+      reply(null, foo)
+    })
+
+    si.error(function(err) {
+      expect(err.code).equal('result_not_objarr')
+      fin()
+    })
+
+    si.act('a:1', function(err, out) {
+      expect(out).not.exist()
+      expect(err.code).equal('result_not_objarr')
+    })
+  }
+
+  function action_callback(fin) {
+    var si = Seneca({ log: 'silent' })
+
+    si.add('a:1', function(msg, reply) {
+      reply({ x: 1 })
+    })
+
+    throw_err_obj()
+
+    function throw_err_obj() {
+      si.error(function(err) {
+        try {
+          expect(err.code).equal('act_callback')
+          expect(err.message).contains('CALLBACK')
+          throw_obj()
+        } catch (e) {
+          fin(e)
+        }
+      })
+
+      si.act('a:1', function(err, out) {
+        throw new Error('CALLBACK')
+      })
+    }
+
+    function throw_obj() {
+      si.error(function(err) {
+        try {
+          expect(err.code).equal('act_callback')
+          expect(err.message).contains('CALLBACK')
+          throw_seneca_error()
+        } catch (e) {
+          fin(e)
+        }
+      })
+
+      si.act('a:1', function(err, out) {
+        throw 'CALLBACK'
+      })
+    }
+
+    function throw_seneca_error() {
+      si.error(function(err) {
+        try {
+          expect(err.code).equal('foo')
+          expect(err.message).contains('foo')
+          fin()
+        } catch (e) {
+          fin(e)
+        }
+      })
+
+      si.act('a:1', function(err, out) {
+        throw si.util.error('foo')
+      })
+    }
+  }
+
+  function plugin_load(fin) {
+    var si = Seneca({ log: 'silent', debug: { undead: true } })
+
+    si.error(function(err) {
+      // TODO: validate
+      fin()
+    })
+
+    si.use(function p0() {
+      throw new Error('p0')
+    })
+  }
 
   function fail_assert(done) {
     return function(err) {
@@ -498,7 +606,7 @@ describe('error', function() {
     }
   }
 
-  function action_callback(done) {
+  function action_callback_legacy(done) {
     var ctxt = { errlog: null }
     var si = make_seneca(ctxt)
 
@@ -578,7 +686,8 @@ describe('error', function() {
 
   function legacy_fail(done) {
     var si = Seneca({
-      log: 'silent'
+      log: 'silent',
+      legacy: { fail: true }
     })
 
     si.options({
@@ -615,5 +724,23 @@ describe('error', function() {
 
     assert.equal('FOO', err.code)
     assert.deepEqual({ BAR: 1 }, err.details)
+  }
+
+  function types(fin) {
+    var si = Seneca({ log: 'silent' })
+
+    si.add('a:1', function(msg, reply) {
+      throw new TypeError('t0')
+    })
+
+    si.error(function(err) {
+      expect(err.code).equal('act_execute')
+      fin()
+    })
+
+    si.act('a:1', function(err, out) {
+      expect(out).not.exist()
+      expect(err.code).equal('act_execute')
+    })
   }
 })

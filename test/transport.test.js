@@ -1,14 +1,10 @@
-/* Copyright (c) 2014-2016 Richard Rodger, MIT License */
+/* Copyright (c) 2014-2018 Richard Rodger and other contributors, MIT License */
 'use strict'
-
-var tmx = parseInt(process.env.TIMEOUT_MULTIPLIER || 1, 10)
-console.log('TEST transport tmx=' + tmx)
 
 var _ = require('lodash')
 var Code = require('code')
-var Lab = require('lab')
+var Lab = require('@hapi/lab')
 
-var Seneca = require('..')
 var Common = require('../lib/common')
 var Transport = require('../lib/api')
 var TransportStubs = require('./stubs/transports')
@@ -16,8 +12,14 @@ var TransportStubs = require('./stubs/transports')
 // Test shortcuts
 var lab = (exports.lab = Lab.script())
 var describe = lab.describe
-var it = lab.it
 var expect = Code.expect
+
+var Shared = require('./shared')
+var it = Shared.make_it(lab)
+
+var Seneca = require('..')
+
+var tmx = parseInt(process.env.TIMEOUT_MULTIPLIER || 1, 10)
 
 var make_test_transport = TransportStubs.make_test_transport
 var make_balance_transport = TransportStubs.make_balance_transport
@@ -50,10 +52,9 @@ describe('transport', function() {
       legacy: { transport: false }
     }).test(fin)
 
-    s0
-      .add('a:1', function a1(msg, reply, meta) {
-        reply({ x: msg.x })
-      })
+    s0.add('a:1', function a1(msg, reply, meta) {
+      reply({ x: msg.x })
+    })
       .add('b:1', function a1(msg, reply, meta) {
         reply([1, 2, 3])
       })
@@ -67,13 +68,41 @@ describe('transport', function() {
 
           expect(meta.pattern).equals('')
           expect(meta.trace[0].desc[0]).equals('a:1')
-
           c0.act('b:1', function(ignore, out, meta) {
             expect(out).equals([1, 2, 3])
 
             s0.close(c0.close.bind(c0, fin))
           })
         })
+      })
+  })
+
+  it('config-legacy-nextgen', test_opts, function(fin) {
+    var s0 = Seneca({ id$: 's0', legacy: { transport: false } }).test(fin)
+    var c0 = Seneca({
+      id$: 'c0',
+      timeout: 22222 * tmx,
+      legacy: { transport: false }
+    }).test(fin)
+
+    s0.add('a:1', function a1(msg, reply, meta) {
+      reply({ x: msg.x })
+    })
+      .listen({ id: 's0a', port: 62011, type: 'direct' })
+      .listen({ id: 's0b', port: 62012, type: 'http' })
+      .ready(function() {
+        c0.client({ id: 'c0a', port: 62011, pin: 'x:1' })
+          .client({ id: 'c0b', port: 62012, pin: 'x:2' })
+
+          .act('a:1,x:1', function(ignore, out) {
+            expect(out.x).equals(1)
+          })
+          .act('a:1,x:2', function(ignore, out) {
+            expect(out.x).equals(2)
+          })
+          .ready(function() {
+            s0.close(c0.close.bind(c0, fin))
+          })
       })
   })
 
@@ -86,10 +115,9 @@ describe('transport', function() {
       legacy: { transport: false }
     })
 
-    s0
-      .add('a:1', function a1(msg, reply, meta) {
-        reply(new Error('bad'))
-      })
+    s0.add('a:1', function a1(msg, reply, meta) {
+      reply(new Error('bad'))
+    })
       .listen(62011)
       .ready(function() {
         c0.client(62011)
@@ -186,10 +214,9 @@ describe('transport', function() {
       .test(fin)
       .use('entity')
 
-    s0
-      .add('a:1', function(msg, reply) {
-        reply({ x: msg.x })
-      })
+    s0.add('a:1', function(msg, reply) {
+      reply({ x: msg.x })
+    })
       .add('b:1', function(msg, reply, meta) {
         expect(msg.x.canon$()).equal('-/-/foo')
         expect(meta.pattern).equal('b:1')
@@ -223,6 +250,139 @@ describe('transport', function() {
         s0.close(c0.close.bind(c0, fin))
       })
     }
+  })
+
+  it('nextgen-transport-local-override', test_opts, function(fin) {
+    Seneca({
+      tag: 's0',
+      timeout: 22222 * tmx,
+      transport: { web: { port: 62020 } },
+      legacy: { transport: false }
+    })
+      .test(fin)
+      .add('foo:1', function foo_srv(msg, reply, meta) {
+        reply({ bar: 1 })
+      })
+      .listen({ pin: 'foo:1' })
+      .ready(function() {
+        Seneca({
+          tag: 'c0',
+          timeout: 22222 * tmx,
+          transport: { web: { port: 62020 } },
+          legacy: { transport: false }
+        })
+          .test(fin)
+          .add('foo:1', function foo_cln(msg, reply, meta) {
+            reply({ bar: 2 })
+          })
+          .client({ pin: 'foo:1' })
+          .act('foo:1,actid$:aa/BB', function(err, out) {
+            expect(err).to.not.exist()
+
+            // The remote version overrides the local version
+            expect(out.bar).to.equal(1)
+
+            // console.dir(this.find('foo:1'), { depth: null })
+
+            fin()
+          })
+      })
+  })
+
+  it('nextgen-meta', test_opts, function(fin) {
+    var s0 = Seneca({ id$: 's0', legacy: { transport: false } }).test(fin)
+    var c0 = Seneca({
+      id$: 'c0',
+      timeout: 22222 * tmx,
+      legacy: { transport: false }
+    }).test(fin)
+
+    s0.add('a:1', function a1(msg, reply, meta) {
+      expect(meta.remote).equal(1 === msg.r)
+
+      // remote is not propogated - top level only
+      if ('b' === msg.from) {
+        expect(meta.remote).false()
+      }
+
+      reply({ x: msg.x, y: meta.custom.y })
+    })
+      .add('b:1', function a1(msg, reply, meta) {
+        expect(meta.remote).equal(1 === msg.r)
+        this.act('a:1', { x: msg.x, from: 'b' }, reply)
+      })
+      .listen(62010)
+      .ready(function() {
+        c0.client(62010).act(
+          'a:1,x:2,r:1',
+          { meta$: { custom: { y: 33 } } },
+          function(ignore, out, meta) {
+            expect(out.y).equals(33)
+            expect(out.x).equals(2)
+
+            this.act('b:1,x:3,r:1', { meta$: { custom: { y: 44 } } }, function(
+              ignore,
+              out,
+              meta
+            ) {
+              expect(out.y).equals(44)
+              expect(out.x).equals(3)
+
+              s0.close(c0.close.bind(c0, fin))
+            })
+          }
+        )
+      })
+  })
+
+  it('nextgen-ordering', test_opts, function(fin) {
+    var s0 = Seneca({ id$: 's0', legacy: { transport: false } }).test(fin)
+    var c0 = Seneca({
+      id$: 'c0',
+      timeout: 22222 * tmx,
+      legacy: { transport: false }
+    }).test(fin)
+
+    s0.add('a:1', function a1(msg, reply, meta) {
+      reply({ x: 'a' })
+    })
+      .add('a:1,b:1', function a1(msg, reply, meta) {
+        reply({ x: 'ab' })
+      })
+      .add('c:1', function a1(msg, reply, meta) {
+        reply({ x: 'c' })
+      })
+      .add('c:1,d:1', function a1(msg, reply, meta) {
+        reply({ x: 'cd' })
+      })
+      .listen(62010)
+      .ready(function() {
+        var i = 0
+        c0.client({ port: 62010, pin: 'a:1' })
+          .client({ port: 62010, pin: 'a:1,b:1' })
+          .client({ port: 62010, pin: 'c:1,d:1' })
+          .client({ port: 62010, pin: 'c:1' })
+          .act('a:1', function(ignore, out) {
+            expect(out).equal({ x: 'a' })
+            i++
+          })
+          .act('c:1', function(ignore, out) {
+            expect(out).equal({ x: 'c' })
+            i++
+          })
+          .act('a:1,b:1', function(ignore, out) {
+            expect(out).equal({ x: 'ab' })
+            i++
+          })
+          .act('c:1,d:1', function(ignore, out) {
+            expect(out).equal({ x: 'cd' })
+            i++
+          })
+          .ready(function() {
+            expect(i).equal(4)
+            fin()
+          })
+      })
   })
 
   // TEST: parent and trace over transport - fake and network
@@ -528,6 +688,35 @@ describe('transport', function() {
       })
   })
 
+  it('transport-local-override', test_opts, function(done) {
+    var tt = make_test_transport()
+
+    Seneca({ tag: 'srv', timeout: 5555 })
+      .test(done)
+      .use(tt)
+      .add('foo:1', function foo_srv(msg, reply, meta) {
+        reply({ bar: 1 })
+      })
+      .listen({ type: 'test', pin: 'foo:1' })
+      .ready(function() {
+        Seneca({ tag: 'cln', timeout: 22222 * tmx })
+          .test(done)
+          .use(tt)
+          .add('foo:1', function foo_cln(msg, reply, meta) {
+            reply({ bar: 2 })
+          })
+          .client({ type: 'test', pin: 'foo:1' })
+          .act('foo:1,actid$:aa/BB', function(err, out) {
+            expect(err).to.not.exist()
+
+            // The remote version overrides the local version
+            expect(out.bar).to.equal(1)
+
+            done()
+          })
+      })
+  })
+
   it('transport-star', test_opts, function(done) {
     var tt = make_test_transport()
 
@@ -543,21 +732,23 @@ describe('transport', function() {
           debug: { short_logs: true }
         })
 
-        si.use(tt).client({ type: 'test', pin: 'foo:*' }).ready(function() {
-          si.act('foo:1', function(err, out) {
-            expect(err).to.not.exist()
-            expect(out.foo).to.equal(1)
-            si.act('foo:2', function(err, out) {
+        si.use(tt)
+          .client({ type: 'test', pin: 'foo:*' })
+          .ready(function() {
+            si.act('foo:1', function(err, out) {
               expect(err).to.not.exist()
-              expect(out.foo).to.equal(2)
-              si.act('bar:1', function(err) {
-                expect(err.code).to.equal('act_not_found')
+              expect(out.foo).to.equal(1)
+              si.act('foo:2', function(err, out) {
+                expect(err).to.not.exist()
+                expect(out.foo).to.equal(2)
+                si.act('bar:1', function(err) {
+                  expect(err.code).to.equal('act_not_found')
 
-                done()
+                  done()
+                })
               })
             })
           })
-        })
       })
   })
 
@@ -571,7 +762,7 @@ describe('transport', function() {
       .listen({ type: 'test', pin: { foo: '*' } })
       .ready(function() {
         var si = Seneca({
-          timeout: 5555,
+          timeout: 9999,
           log: 'silent',
           debug: { short_logs: true }
         })
@@ -675,8 +866,7 @@ describe('transport', function() {
           log: 'silent',
           debug: { short_logs: true }
         })
-        si
-          .use(tt)
+        si.use(tt)
           .add('foo:1', function(msg, reply) {
             reply(msg)
           })
@@ -1002,20 +1192,40 @@ describe('transport', function() {
     }
   })
 
-  it('fatal$ false with transport not-found kill process', test_opts, function(
-    done
-  ) {
-    Seneca({ log: 'silent' }).listen().ready(function() {
-      var client = Seneca({ timeout: 30, log: 'silent' })
-      client.client()
+  // Thanks to https://github.com/davide-talesco for this test
+  // https://github.com/senecajs/seneca-transport/issues/165
+  it('multi-layer-error', test_opts, function(fin) {
+    const s1 = Seneca({ tag: 's1', legacy: { transport: false } }).quiet()
+    const s2 = Seneca({ tag: 's2', legacy: { transport: false } }).quiet()
+    const s3 = Seneca({ tag: 's3', legacy: { transport: false } }).quiet()
 
-      client.ready(function() {
-        client.act({ foo: 1, fatal$: false }, function(err) {
-          expect(err).to.exist()
-          done()
-        })
+    s1.client({ port: 40402, pin: 'cmd:test2' })
+      .add('cmd:test1', function(msg, reply) {
+        this.act('cmd:test2', reply)
       })
-    })
+      .listen(40401)
+
+    s2.client({ port: 40403, pin: 'cmd:test3' })
+      .add('cmd:test2', function(msg, reply) {
+        this.act('cmd:test3', reply)
+      })
+      .listen(40402)
+
+    s3.add('cmd:test3', function(msg, reply) {
+      throw new Error('from-test3')
+    }).listen(40403)
+
+    s1.ready(
+      s2.ready.bind(
+        s2,
+        s3.ready.bind(s3, function() {
+          s1.act('cmd:test1', function(err) {
+            expect(err.message).equal('from-test3')
+            fin()
+          })
+        })
+      )
+    )
   })
 
   it('server can be restarted without issues to clients', test_opts, function(
